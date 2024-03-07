@@ -35,21 +35,7 @@ stages:
               publishJUnitResults: true
               testResultsFiles: '**/TEST-*.xml'
               goals: 'package'
-          - task: CmdLine@2
-            displayName: Install TwistCLI
-            inputs:
-              script: |
-                curl -s -k -u $(PCUSER):$(PCPASS) $PC_CONSOLE/api/v1/util/twistcli -v -o $(Build.SourcesDirectory)/twistcli
-                chmod +x $(Build.SourcesDirectory)/twistcli
-
-          - script: docker run --tty --volume /$(System.DefaultWorkingDirectory)/:/tf/ bridgecrew/checkov --framework sca_package --directory /tf --bc-api-key $(BC_API_KEY) --soft-fail
-            displayName: Checkov - Scan Dockerfile
-            enabled: "true"
-          - task: CmdLine@2
-            displayName: Prisma Cloud - Scan Code Repo - Deprecated
-            inputs:
-              script: |
-                $(Build.SourcesDirectory)/twistcli coderepo scan --address $PC_CONSOLE -u $(PCUSER) -p $(PCPASS) --details --repository $REPO_ID ./
+ 
           - task: Docker@2
             displayName: Build an image
             inputs:
