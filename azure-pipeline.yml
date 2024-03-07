@@ -1,0 +1,106 @@
+# Docker
+# Build a Docker image
+# https://docs.microsoft.com/azure/devops/pipelines/languages/docker
+
+trigger:
+  - main
+
+resources:
+  - repo: self
+
+variables:
+  tag: "$(Build.BuildId)"
+  REPO_ID: "JavaSpringWebApp/Main"
+  BUILD_IMAGE: "simonpanw/javaspringwebapp"
+  REMOTE_REGISTRY: "registry.myprismacloud.com"
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: PreBuild
+    displayName: Pre Build Dockerfile check
+    jobs:
+      - job: PreBuild
+        displayName: Pre Build Dockerfile check
+        steps:
+          - script: docker run --tty --volume /$(System.DefaultWorkingDirectory)/Dockerfile:/tf/Dockerfile bridgecrew/checkov --directory /tf --bc-api-key $(BC_API_KEY) --soft-fail
+            displayName: Checkov - Scan Dockerfile
+            enabled: "true"
+
+  - stage: Build
+    displayName: Build, Scan and Push image
+    jobs:
+      - job: Build
+        displayName: Build, Scan and Push image
+        steps:
+          - task: Maven@3
+            inputs:
+              mavenPomFile: 'pom.xml'
+              mavenOptions: '-Xmx3072m'
+              javaHomeOption: 'JDKVersion'
+              jdkVersionOption: '1.8'
+              jdkArchitectureOption: 'x64'
+              publishJUnitResults: true
+              testResultsFiles: '**/TEST-*.xml'
+              goals: 'package'
+          - task: CmdLine@2
+            displayName: Install TwistCLI
+            inputs:
+              script: |
+                curl -s -k -u $(PCUSER):$(PCPASS) $PC_CONSOLE/api/v1/util/twistcli -v -o $(Build.SourcesDirectory)/twistcli
+                chmod +x $(Build.SourcesDirectory)/twistcli
+
+          - script: docker run --tty --volume /$(System.DefaultWorkingDirectory)/:/tf/ bridgecrew/checkov --framework sca_package --directory /tf --bc-api-key $(BC_API_KEY) --soft-fail
+            displayName: Checkov - Scan Dockerfile
+            enabled: "true"
+          - task: CmdLine@2
+            displayName: Prisma Cloud - Scan Code Repo - Deprecated
+            inputs:
+              script: |
+                $(Build.SourcesDirectory)/twistcli coderepo scan --address $PC_CONSOLE -u $(PCUSER) -p $(PCPASS) --details --repository $REPO_ID ./
+          - task: Docker@2
+            displayName: Build an image
+            inputs:
+              repository: "docker.io/$(BUILD_IMAGE)"
+              command: build
+              dockerfile: "$(Build.SourcesDirectory)/Dockerfile"
+              tags: |
+                latest
+                $(tag)
+          - task: Docker@2
+            displayName: List builded images
+            inputs:
+              repository: $(Build.Repository.Name)
+              command: "images"
+          - task: CmdLine@2
+            displayName: Install TwistCLI
+            inputs:
+              script: |
+                curl -s -k -u $(PCUSER):$(PCPASS) $PC_CONSOLE/api/v1/util/twistcli -v -o $(Build.SourcesDirectory)/twistcli
+                chmod +x $(Build.SourcesDirectory)/twistcli
+          - task: CmdLine@2
+            displayName: Prisma Cloud - Sandbox Container Imgae
+            inputs:
+              script: |
+                sudo $(Build.SourcesDirectory)/twistcli sandbox --address $PC_CONSOLE -u $(PCUSER) -p $(PCPASS) --analysis-duration 30s -e "MY_ENV_VAR1=gfd45gdf7gterte8gsgds7gds5" -e "MY_ENV_VAR2=erte8gsgds7gds5" $BUILD_IMAGE java -Djava.security.egd=file:/dev/./urandom -jar /spring-boot-minimal-web-app-latest.jar
+          - task: CmdLine@2
+            displayName: Prisma Cloud - Scan
+            inputs:
+              script: |
+                $(Build.SourcesDirectory)/twistcli images scan --address $PC_CONSOLE -u $(PCUSER) -p $(PCPASS) --details $BUILD_IMAGE
+          - task: Docker@2
+            displayName: Push image to the Registry
+            inputs:
+              repository: $(Build.Repository.Name)
+              command: "push"
+
+  - stage: PreDeploy
+    displayName: Pre Deploy yaml file check
+    jobs:
+      - job: PreDeploy
+        displayName: Pre Deploy yaml file check
+        steps:
+          - script: docker run --tty --volume /$(System.DefaultWorkingDirectory)/deploy:/tf bridgecrew/checkov --directory /tf --bc-api-key $(BC_API_KEY) --soft-fail
+            displayName: Checkov - K8S Manifest Analysis
+            enabled: "true"
