@@ -30,7 +30,7 @@ stages:
             inputs:
               repository: "docker.io/$(BUILD_IMAGE)"
               command: build
-              dockerfile: "$(Build.SourcesDirectory)/Dockerfile"
+              dockerfile: "**/Dockerfile"
               tags: |
                 latest
                 $(tag)
